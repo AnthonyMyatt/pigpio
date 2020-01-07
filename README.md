@@ -1,33 +1,53 @@
+[![npm Version](http://img.shields.io/npm/v/pigpio.svg)](https://www.npmjs.com/package/pigpio)
+[![Downloads Per Month](http://img.shields.io/npm/dm/pigpio.svg)](https://www.npmjs.com/package/pigpio)
+[![Mentioned in Awesome Node.js](https://awesome.re/mentioned-badge.svg)](https://github.com/sindresorhus/awesome-nodejs)
+
 # pigpio
 
 A wrapper for the [pigpio C library](https://github.com/joan2937/pigpio) to
 enable fast GPIO, PWM, servo control, state change notification and interrupt
-handling with **Node.js** on the Raspberry Pi Zero, 1, 2 or 3.
+handling with **Node.js** on the Raspberry Pi Zero, 1, 2, 3 or 4.
 
-pigpio supports Node.js versions 0.10, 0.12, 4, 5, 6, 7, 8 and 9.
+**At the moment both the pigpio Node.js module and the pigpio C library are
+experimental on the Raspberry Pi 4 Model B.**
 
-[![Mentioned in Awesome Node.js](https://awesome.re/mentioned-badge.svg)](https://github.com/sindresorhus/awesome-nodejs)
+pigpio supports Node.js versions 6, 8, 10 and 12.
 
 ## Contents
 
+ * [News & Updates](#news--updates)
  * [Features](#features)
  * [Installation](#installation)
  * [Usage](#usage)
    * [Pulse an LED with PWM](#pulse-an-led-with-pwm)
-   * [Buttons and interrupt handling](#buttons-and-interrupt-handling)
-   * [Servo control](#servo-control)
-   * [Measure distance with a HC-SR04 ultrasonic sensor](#measure-distance-with-a-hc-sr04-ultrasonic-sensor)
-   * [Determine the width of a pulse with alerts](#determine-the-width-of-a-pulse-with-alerts)
- * [API documentation](#api-documentation)
- * [Performance](#performance)
+   * [Buttons and Interrupt Handling](#buttons-and-interrupt-handling)
+   * [Servo Control](#servo-control)
+   * [Measure Distance with a HC-SR04 Ultrasonic Sensor](#measure-distance-with-a-hc-sr04-ultrasonic-sensor)
+   * [Determine the Width of a Pulse with Alerts](#determine-the-width-of-a-pulse-with-alerts)
+   * [Debounce a Button](#debounce-a-button)
+   * [Generate a waveform](#generate-a-waveform)
+   * [Sending a wavechain](#sending-a-wavechain)
+ * [API Documentation](#api-documentation)
  * [Limitations](#limitations)
- * [Related packages](#related-packages)
+ * [Troubleshooting](#troubleshooting)
+ * [Related Packages](#related-packages)
+
+## News & Updates
+
+### September 2019: pigpio v2.0.0
+
+pigpio v2.0.0 adds experimental support for the Raspberry Pi 4 Model B. Adding
+this support has resulted in a number of changes related to hardware PWM.
+These changes are specific to the Raspberry Pi 4 Model B. There have been no
+changes for the Raspberry Pi Zero, 1, 2 or 3. For further details see
+[hardwarePwmWrite](https://github.com/fivdi/pigpio/blob/master/doc/gpio.md#hardwarepwmwritefrequency-dutycycle) and
+[getPwmRealRange](https://github.com/fivdi/pigpio/blob/master/doc/gpio.md#getpwmrealrange).
 
 ## Features
 
  * Digital IO
-   * Up to 2.1 million digital reads per second <sup>*)</sup>
-   * Up to 2.3 million digital writes per second <sup>*)</sup>
+   * Up to 3.5 million digital reads per second <sup>*)</sup>
+   * Up to 2.5 million digital writes per second <sup>*)</sup>
  * PWM on any of GPIOs 0 through 31
    * Multiple frequencies and duty cycle ranges supported
  * Servo control on any of GPIOs 0 through 31
@@ -41,34 +61,43 @@ pigpio supports Node.js versions 0.10, 0.12, 4, 5, 6, 7, 8 and 9.
  * Read or write up to 32 GPIOs as one operation with banked GPIO
  * Trigger pulse generation
  * Pull up/down resistor configuration
+ * Waveforms to generate GPIO level changes (time accurate to a few µs)
 
-*) On a Raspberry Pi 3 Model B V1.2 running at 1.2 GHz ([Performance](#performance))
+*) On a Raspberry Pi 4 Model B running Raspbian Buster 2019-07-10 with pigpio
+v2.0.0, Node.js v12.10.0 and V70 of the pigpio C library.
 
 ## Installation
 
 #### Step 1 - Install the pigpio C library
 
-The pigpio Node.js package requires the pigpio C library V41 or higher.
+The [pigpio C library](https://github.com/joan2937/pigpio) is a prerequisite
+for the pigpio Node.js module.
 
-Raspbian Jessie 2016-05-10 or newer comes with the pigpio C library
-pre-installed so it need not be manually installed.
+Run the following command to determine which version of the pigpio C library
+is installed:
 
-Raspbian Jessie Lite 2016-05-10 or newer does not come with the pigpio C
-library pre-installed so it must be manually installed with the following
-commands:
+```
+pigpiod -v
+```
+
+For the Raspberry Pi Zero, 1, 2 and 3 V41 or higher of the pigpio C library is
+required. For the Raspberry Pi 4 V69 or higher is required.
+
+If the pigpio C library is not installed or if the installed version is too
+old, the latest version can be installed with the following commands:
 
 ```
 sudo apt-get update
 sudo apt-get install pigpio
 ```
 
-The pigpio C library contains a number of utilities. One of these utilities
-is pigpiod which launches the pigpio C library as a daemon. This utility
-should not be used as the pigpio Node.js package uses the C library directly.
+Alternative installation instructions for the pigpio C library can be found
+[here](http://abyz.me.uk/rpi/pigpio/download.html).
 
-Installation instructions for the pigpio C library on versions of Raspbian
-prior to 2016-05-10 can be found
-[here](http://abyz.co.uk/rpi/pigpio/download.html).
+**Warning:** The pigpio C library contains a number of utilities. One of these
+utilities is pigpiod which launches the pigpio C library as a daemon. This
+utility should not be used as the pigpio Node.js package uses the C library
+directly.
 
 #### Step 2 - Install the pigpio Node.js package
 
@@ -89,11 +118,13 @@ Use PWM to pulse the LED connected to GPIO17 from fully off to fully on
 continuously.
 
 ```js
-var Gpio = require('pigpio').Gpio,
-  led = new Gpio(17, {mode: Gpio.OUTPUT}),
-  dutyCycle = 0;
+const Gpio = require('pigpio').Gpio;
 
-setInterval(function () {
+const led = new Gpio(17, {mode: Gpio.OUTPUT});
+
+let dutyCycle = 0;
+
+setInterval(() => {
   led.pwmWrite(dutyCycle);
 
   dutyCycle += 5;
@@ -101,41 +132,43 @@ setInterval(function () {
     dutyCycle = 0;
   }
 }, 20);
-
 ```
 
-#### Buttons and interrupt handling
+#### Buttons and Interrupt Handling
 
 Turn the LED connected to GPIO17 on when the momentary push button connected to
 GPIO4 is pressed. Turn the LED off when the button is released.
 
 ```js
-var Gpio = require('pigpio').Gpio,
-  button = new Gpio(4, {
-    mode: Gpio.INPUT,
-    pullUpDown: Gpio.PUD_DOWN,
-    edge: Gpio.EITHER_EDGE
-  }),
-  led = new Gpio(17, {mode: Gpio.OUTPUT});
+const Gpio = require('pigpio').Gpio;
 
-button.on('interrupt', function (level) {
+const led = new Gpio(17, {mode: Gpio.OUTPUT});
+const button = new Gpio(4, {
+  mode: Gpio.INPUT,
+  pullUpDown: Gpio.PUD_DOWN,
+  edge: Gpio.EITHER_EDGE
+});
+
+button.on('interrupt', (level) => {
   led.digitalWrite(level);
 });
 ```
 
-#### Servo control
+#### Servo Control
 
 Continuously move a servo connected to GPIO10 clockwise and anti-clockwise.
 
 <img src="https://raw.githubusercontent.com/fivdi/pigpio/master/example/servo.png">
 
 ```js
-var Gpio = require('pigpio').Gpio,
-  motor = new Gpio(10, {mode: Gpio.OUTPUT}),
-  pulseWidth = 1000,
-  increment = 100;
+const Gpio = require('pigpio').Gpio;
 
-setInterval(function () {
+const motor = new Gpio(10, {mode: Gpio.OUTPUT});
+
+let pulseWidth = 1000;
+let increment = 100;
+
+setInterval(() => {
   motor.servoWrite(pulseWidth);
 
   pulseWidth += increment;
@@ -147,7 +180,7 @@ setInterval(function () {
 }, 1000);
 ```
 
-#### Measure distance with a HC-SR04 ultrasonic sensor
+#### Measure Distance with a HC-SR04 Ultrasonic Sensor
 
 The `trigger` function can be used to generate a pulse on a GPIO and alerts can
 be used to determine the time of a GPIO state change accurate to a few
@@ -157,39 +190,39 @@ HC-SR04 ultrasonic sensor.
 <img src="https://raw.githubusercontent.com/fivdi/pigpio/master/example/distance-hc-sr04.png">
 
 ```js
-var Gpio = require('pigpio').Gpio,
-  trigger = new Gpio(23, {mode: Gpio.OUTPUT}),
-  echo = new Gpio(24, {mode: Gpio.INPUT, alert: true});
+const Gpio = require('pigpio').Gpio;
 
 // The number of microseconds it takes sound to travel 1cm at 20 degrees celcius
-var MICROSECDONDS_PER_CM = 1e6/34321;
+const MICROSECDONDS_PER_CM = 1e6/34321;
+
+const trigger = new Gpio(23, {mode: Gpio.OUTPUT});
+const echo = new Gpio(24, {mode: Gpio.INPUT, alert: true});
 
 trigger.digitalWrite(0); // Make sure trigger is low
 
-(function () {
-  var startTick;
+const watchHCSR04 = () => {
+  let startTick;
 
-  echo.on('alert', function (level, tick) {
-    var endTick,
-      diff;
-
+  echo.on('alert', (level, tick) => {
     if (level == 1) {
       startTick = tick;
     } else {
-      endTick = tick;
-      diff = (endTick >> 0) - (startTick >> 0); // Unsigned 32 bit arithmetic
+      const endTick = tick;
+      const diff = (endTick >> 0) - (startTick >> 0); // Unsigned 32 bit arithmetic
       console.log(diff / 2 / MICROSECDONDS_PER_CM);
     }
   });
-}());
+};
+
+watchHCSR04();
 
 // Trigger a distance measurement once per second
-setInterval(function () {
+setInterval(() => {
   trigger.trigger(10, 1); // Set trigger high for 10 microseconds
 }, 1000);
 ```
 
-#### Determine the width of a pulse with alerts
+#### Determine the Width of a Pulse with Alerts
 
 Alerts can be used to determine the time of a GPIO state change accurate to a
 few microseconds. Typically, alerts will be used for GPIO inputs but they can
@@ -200,32 +233,32 @@ Alerts are used to measure the length of the pulse.
 ```js
 // Assumption: the LED is off when the program is started
 
-var Gpio = require('pigpio').Gpio,
-  led = new Gpio(17, {
-    mode: Gpio.OUTPUT,
-    alert: true
-  });
+const Gpio = require('pigpio').Gpio;
 
-(function () {
-  var startTick;
+const led = new Gpio(17, {
+  mode: Gpio.OUTPUT,
+  alert: true
+});
+
+const watchLed = () => {
+  let startTick;
 
   // Use alerts to determine how long the LED was turned on
-  led.on('alert', function (level, tick) {
-    var endTick,
-      diff;
-
+  led.on('alert', (level, tick) => {
     if (level == 1) {
       startTick = tick;
     } else {
-      endTick = tick;
-      diff = (endTick >> 0) - (startTick >> 0); // Unsigned 32 bit arithmetic
+      const endTick = tick;
+      const diff = (endTick >> 0) - (startTick >> 0); // Unsigned 32 bit arithmetic
       console.log(diff);
     }
   });
-}());
+};
+
+watchLed();
 
 // Turn the LED on for 15 microseconds once per second
-setInterval(function () {
+setInterval(() => {
   led.trigger(15, 1);
 }, 1000);
 ```
@@ -246,7 +279,137 @@ Here's an example of the typical output to the console:
 15
 ```
 
-## API documentation
+#### Debounce a Button
+The GPIO glitch filter will prevent alert events from being emitted if the
+corresponding level change is not stable for at least a specified number of
+microseconds. This can be used to filter out unwanted noise from an input
+signal. In this example, a glitch filter is applied to filter out the contact
+bounce of a push button.
+
+![Button debounce circuit](example/button-debounce.png)
+
+```js
+const Gpio = require('pigpio').Gpio;
+
+const button = new Gpio(23, {
+  mode: Gpio.INPUT,
+  pullUpDown: Gpio.PUD_UP,
+  alert: true
+});
+
+let count = 0;
+
+// Level must be stable for 10 ms before an alert event is emitted.
+button.glitchFilter(10000);
+
+button.on('alert', (level, tick) => {
+  if (level === 0) {
+    console.log(++count);
+  }
+});
+```
+
+#### Generate a waveform
+
+Waveforms can be used to time and execute Gpio level changes with an accuracy up to 1 microsecond. The following example generates a waveform that starts with a 1µs pulse, then has a 2µs pause, followed by a 3µs pulse and so on.
+The waveform definition is a simple Array where each entry is an object with the properties gpioOn, gpioOff and usDelay.
+
+The basic workflow to generate and execute waveforms is as follows:
+
+First, we usually clear previous wave entries with the `waveClear` method.
+Then we can add pulses with the `waveAddGeneric` method to the cleared waveform.
+We then create a waveId by calling the `waveCreate` method.
+To execute the waveform, we call the `waveTxSend` method.
+Once the wave is sent, we can delete the wave by calling the `waveDelete` method.
+
+```js
+const pigpio = require('pigpio');
+const Gpio = pigpio.Gpio;
+
+const outPin = 17;
+
+const output = new Gpio(outPin, {
+  mode: Gpio.OUTPUT
+});
+  
+let waveform = [];
+
+for (let x = 0; x < 20; x++) {
+  if (x % 2 === 1) {
+    waveform.push({ gpioOn: outPin, gpioOff: 0, usDelay: x + 1 });
+  } else {
+    waveform.push({ gpioOn: 0, gpioOff: outPin, usDelay: x + 1 });
+  }
+}
+
+output.waveClear();
+
+output.waveAddGeneric(waveform);
+
+let waveId = output.waveCreate();
+
+if (waveId >= 0) {
+  output.waveTxSend(waveId, pigpio.WAVE_MODE_ONE_SHOT);
+}
+
+while (output.waveTxBusy()) {}
+
+output.waveDelete(waveId);
+```
+#### Sending a wavechain
+
+The `waveChain` method allows you to chain multiple waveforms together.
+A chain is basically just an array with several waveId's. However you can insert different modifiers as described [here](https://github.com/fivdi/pigpio/blob/master/doc/gpio.md#wavechainchain).
+
+In the example the `chain` consists of two waves. The first waveform is transmitted normally, the second waveform is repeated 3 times.
+```js
+const pigpio = require('pigpio');
+const Gpio = pigpio.Gpio;
+
+const outPin = 17;
+const output = new Gpio(outPin, {
+  mode: Gpio.OUTPUT
+});
+
+output.waveClear();
+
+let firstWaveForm = [];
+let secondWaveForm = [];
+
+for (let x = 0; x < 10; x++) {
+  if (x % 2 === 0) {
+    firstWaveForm.push({ gpioOn: outPin, gpioOff: 0, usDelay: 10 });
+  } else {
+    firstWaveForm.push({ gpioOn: 0, gpioOff: outPin, usDelay: 10 });
+  }
+}
+
+output.waveAddGeneric(firstWaveForm);
+let firstWaveId = output.waveCreate();
+
+for (let x = 0; x < 10; x++) {
+  if (x % 2 === 0) {
+    secondWaveForm.push({ gpioOn: outPin, gpioOff: 0, usDelay: 20 });
+  } else {
+    secondWaveForm.push({ gpioOn: 0, gpioOff: outPin, usDelay: 20 });
+  }
+}
+
+output.waveAddGeneric(secondWaveForm);
+let secondWaveId = output.waveCreate();
+
+if (firstWaveId >= 0 && secondWaveId >= 0) {
+  let chain = [firstWaveId, 255, 0, secondWaveId, 255, 1, 3, 0];
+  output.waveChain(chain);
+}
+
+while (output.waveTxBusy()) {}
+
+output.waveDelete(firstWaveId);
+output.waveDelete(secondWaveId);
+```
+
+## API Documentation
 
 ### Classes
 
@@ -254,31 +417,13 @@ Here's an example of the typical output to the console:
 - [GpioBank](https://github.com/fivdi/pigpio/blob/master/doc/gpiobank.md) - Banked General Purpose Input Output
 - [Notifier](https://github.com/fivdi/pigpio/blob/master/doc/notifier.md) - Notification Stream
 
+### pigpio Module
+
+- [Global](https://github.com/fivdi/pigpio/blob/master/doc/global.md) - Module Globals
+
 ### Configuring pigpio
 
 - [Configuration](https://github.com/fivdi/pigpio/blob/master/doc/configuration.md) - pigpio configuration
-
-## Performance
-
-Three of the pigpio tests are used to monitor performance:
-
- * digital-read-performance.js - determine max. no. of digitalRead ops per second
- * digital-write-performance.js - determine max. no. of digitalWrite ops per second
- * isr-performance.js - determine max. no. of interrupts per second
-
-The average of ten runs of these tests are shown in the table below.
-
- Name | Pi 2 | Pi 3
-:--- | :--- | :---
-Pi Model | Raspberry Pi 2 Model B V1.1 | Raspberry Pi 3 Model B V1.2
-OS | Raspbian Jessie 2016-02-09 | Raspbian Jessie 2016-02-26
-Kernel | 4.1.17-v7+ | 4.1.18-v7+
-Node.js | v5.6.0 armv7l | v5.7.0 armv7l
-pigpio | v0.3.0 | v0.3.2
-pigpio C library | V45 | V47
-Reads per second | 1,232,588 | 2,129,221
-Writes per second | 1,323,039 | 2,336,157
-Interrupts per second | 8,881 | 20,533
 
 ## Limitations
 
@@ -287,8 +432,11 @@ Interrupts per second | 8,881 | 20,533
    pigpio C library is that it can only be used by a single running process.
  * The pigpio C library and therefore the pigpio Node.js package requires
    root/sudo privileges to access hardware peripherals.
+   
+## Troubleshooting
+If you have a problem with the library, before you remove it from your code and start trying something else, please check the [troubleshooting page](https://github.com/fivdi/pigpio/blob/master/doc/troubleshooting.md) first. Some problems are solvable and documented.
 
-## Related packages
+## Related Packages
 
 Here are a few links to other hardware specific Node.js packages that may be of interest.
 
@@ -296,5 +444,5 @@ Here are a few links to other hardware specific Node.js packages that may be of 
 - [i2c-bus](https://github.com/fivdi/i2c-bus) - I2C serial bus access
 - [spi-device](https://github.com/fivdi/spi-device) - SPI serial bus access
 - [mcp-spi-adc](https://github.com/fivdi/mcp-spi-adc) - Analog to digital conversion with the MCP3002/4/8, MCP3202/4/8 and MCP3304
+- [pigpio-dht](https://github.com/depuits/pigpio-dht) - Implements logic to read DHT11 or DHT22/AM2302 temperature and relative humidity sensor
 - [pigpio-mock](https://github.com/deepsyx/pigpio-mock) - A pigpio mock library for development on your local machine
-
